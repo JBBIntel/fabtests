@@ -355,6 +355,11 @@ void show_perf_mr(int tsize, int iters, struct timespec *start,
 int send_recv_greeting(struct fid_ep *ep);
 int check_recv_msg(const char *message);
 uint64_t ft_info_to_mr_access(struct fi_info *info);
+uint64_t *ft_access_to_comb(uint64_t fixed_bits, uint64_t opt_bits);
+void access_combinations(uint64_t *combinations, int *num_comb,
+		uint64_t *flags, int num_flags, int choose, 
+		int curr, uint64_t building);
+
 
 #define FT_PROCESS_QUEUE_ERR(readerr, rd, queue, fn, str)	\
 	do {							\

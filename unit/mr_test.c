@@ -48,58 +48,79 @@ static char err_buf[512];
  */
 static int mr_reg()
 {
-	int i;
+	int i, j;
 	int ret = 0;
-	int testret;
+	int testret = FAIL;
 	struct fid_mr *mr;
+	uint64_t access;
+	uint64_t *access_combinations;
 
-	testret = FAIL;
+	access = ft_info_to_mr_access(fi);
+	access_combinations = ft_access_to_comb(0, access);
 
 	for (i = 0; i < test_cnt; i++) {
 		buf_size = test_size[i].size;
+		for (j = 0; access_combinations[j] != 0; j++) {
+			ret = fi_mr_reg(domain, buf, buf_size, access_combinations[j], 0,
+					FT_MR_KEY, 0, &mr, NULL);
+			if (ret) {
+				FT_UNIT_STRERR(err_buf, "fi_mr_reg failed", ret);
+				goto fail;
+			}
 
-		// TODO test for various access
-		ret = fi_mr_reg(domain, buf, buf_size, ft_info_to_mr_access(fi), 0,
-				FT_MR_KEY, 0, &mr, NULL);
-		if (ret) {
-			FT_UNIT_STRERR(err_buf, "fi_mr_reg failed", ret);
-			goto fail;
-		}
-		ret = fi_close(&mr->fid);
-		if (ret) {
-			FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
-			goto fail;
+			ret = fi_close(&mr->fid);
+			if (ret) {
+				FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
+				goto fail;
+			}
 		}
 	}
 	testret = PASS;
 fail:
 	mr = NULL;
+	free(access_combinations);
 	return TEST_RET_VAL(ret, testret);
 }
 
 static int mr_regv()
 {
-	int ret;
-	int testret;
+	int i, j;
+	int ret = 0;
+	int testret = FAIL;
 	struct fid_mr *mr;
-	struct iovec iov;
+	struct iovec *iov;
+	char *base;
 
-	testret = FAIL;
-
-	iov.iov_base = buf;
-	iov.iov_len = test_size[test_cnt / 2].size;
-
-	// TODO test for various iov counts
-	ret = fi_mr_regv(domain, &iov, 1, ft_info_to_mr_access(fi), 0,
-			FT_MR_KEY, 0, &mr, NULL);
-	if (ret) {
-		FT_UNIT_STRERR(err_buf, "fi_mr_regv failed", ret);
+	if (!fi->domain_attr->mr_iov_limit) {
+		ret = 1;
+		FT_UNIT_STRERR(err_buf, "fi_mr_regv failed, mr_iov_limit not defined", ret);
 		goto fail;
 	}
-	ret = fi_close(&mr->fid);
-	if (ret) {
-		FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
-		goto fail;
+
+	for (i = 1; i <= fi->domain_attr->mr_iov_limit; i++) {
+		base = buf;
+		iov = malloc(sizeof(struct iovec) * i);
+		for (j = 0; j < i; j++) {
+			iov[j].iov_base = base;
+			iov[j].iov_len = test_size[test_cnt - 1].size / i;
+			base += iov[j].iov_len;			
+		}			
+
+		ret = fi_mr_regv(domain, &iov[0], i, ft_info_to_mr_access(fi), 0,
+				 FT_MR_KEY, 0, &mr, NULL);
+		if (ret) {
+			FT_UNIT_STRERR(err_buf, "fi_mr_regv failed", ret);
+			free(iov);
+			goto fail;
+		}
+
+		ret = fi_close(&mr->fid);
+		if (ret) {
+			free(iov);
+			FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
+			goto fail;
+		}
+		free(iov);
 	}
 	testret = PASS;
 fail:
@@ -109,33 +130,47 @@ fail:
 
 static int mr_regattr()
 {
-	int ret;
-	int testret;
+	int i, j;
+	int ret = 0;
+	int testret = FAIL;
 	struct fid_mr *mr;
-	struct iovec iov;
+	struct iovec *iov;
 	struct fi_mr_attr attr;
+	char *base;
 
-	testret = FAIL;
+	if (!fi->domain_attr->mr_iov_limit) {
+		ret = 1;
+		FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed, mr_iov_limit not defined", ret);
+		goto fail;
+	}
 
-	iov.iov_base = buf;
-	iov.iov_len = test_size[test_cnt / 2].size;
-
-	attr.mr_iov = &iov;
-	attr.iov_count = 1;
 	attr.access = ft_info_to_mr_access(fi);
 	attr.requested_key = FT_MR_KEY;
 	attr.context = NULL;
 
-	// TODO test for various iov sizes
-	ret = fi_mr_regattr(domain, &attr, 0, &mr);
-	if (ret) {
-		FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed", ret);
-		goto fail;
-	}
-	ret = fi_close(&mr->fid);
-	if (ret) {
-		FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
-		goto fail;
+	for (i = 1; i <= fi->domain_attr->mr_iov_limit; i++) {	
+		base = buf;
+		iov =  malloc (sizeof(struct iovec) * i);
+		for (j = 0; j < i; j++) {
+			iov[j].iov_base = base;
+			iov[j].iov_len = test_size[test_cnt - 1].size / i;
+			base += iov[j].iov_len;
+		}
+
+		attr.iov_count = i;
+		attr.mr_iov = &iov[0];
+		ret = fi_mr_regattr(domain, &attr, 0, &mr);
+		if (ret) {
+			FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed", ret);
+			goto fail;
+		}
+
+		ret = fi_close(&mr->fid);
+		if (ret) {
+			FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
+			goto fail;
+		}
+		free(iov);
 	}
 	testret = PASS;
 fail:

@@ -234,6 +234,56 @@ uint64_t ft_info_to_mr_access(struct fi_info *info)
 	return mr_access;
 }
 
+uint64_t *ft_access_to_comb(uint64_t fixed_bits, uint64_t opt_bits)
+{
+	uint64_t flags[10];
+	int num_flags = 0;
+	uint64_t *combinations;
+	int buff_size;
+	int i;
+	int index;
+
+	for (i = 0; i < 64 && num_flags < 10; i++) {
+		if (opt_bits >> i & 1)
+			flags[num_flags++] = 1 << i;
+	}
+		
+	if (num_flags == 10)
+		return NULL;
+
+	buff_size = 1;
+	for (i = 0; i < num_flags; i++)
+		buff_size *= 2;
+
+	combinations = calloc(buff_size, sizeof(fixed_bits));
+
+	index = 0;
+	for (i = 1; i <= num_flags; ++i)
+		access_combinations(combinations, &index, flags, num_flags, i, 0, 0);
+
+	for (i = 0; i < buff_size - 1; i++)
+		combinations[i] |= fixed_bits;
+
+	return combinations;
+}
+
+void access_combinations(uint64_t *combinations, int *num_comb, uint64_t *flags,
+			 int num_flags, int choose, int curr, uint64_t building)
+{
+	if (choose + curr > num_flags)
+		return;
+
+	if (!choose) {
+		combinations[(*num_comb)++] = building;
+	} else {
+		for (; curr < num_flags; curr++) {
+			access_combinations(combinations, num_comb, flags, num_flags,
+					    choose - 1, curr + 1, building | flags[curr]);
+		}
+	}
+}
+
+
 /*
  * Include FI_MSG_PREFIX space in the allocated buffer, and ensure that the
  * buffer is large enough for a control message used to exchange addressing
