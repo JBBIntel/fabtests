@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel Corporation.  All rights reserved.
  * Copyright (c) 2014-2016, Cisco Systems, Inc. All rights reserved.
  *
  * This software is available to you under the BSD license below:
@@ -355,11 +355,9 @@ void show_perf_mr(int tsize, int iters, struct timespec *start,
 int send_recv_greeting(struct fid_ep *ep);
 int check_recv_msg(const char *message);
 uint64_t ft_info_to_mr_access(struct fi_info *info);
-uint64_t *ft_access_to_comb(uint64_t fixed_bits, uint64_t opt_bits);
-void access_combinations(uint64_t *combinations, int *num_comb,
-		uint64_t *flags, int num_flags, int choose, 
-		int curr, uint64_t building);
-
+int ft_alloc_bit_combo(uint64_t fixed, uint64_t opt, uint64_t **combos, int *len);
+void ft_free_bit_combo(uint64_t *combo);
+int ft_cntr_open(struct fid_cntr **cntr);
 
 #define FT_PROCESS_QUEUE_ERR(readerr, rd, queue, fn, str)	\
 	do {							\

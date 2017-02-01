@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel Corporation.  All rights reserved.
  * Copyright (c) 2016 Cray Inc.  All rights reserved.
  * Copyright (c) 2014-2016, Cisco Systems, Inc. All rights reserved.
  *
@@ -213,6 +213,12 @@ static void ft_cntr_set_wait_attr(void)
 	}
 }
 
+int ft_cntr_open(struct fid_cntr **cntr)
+{
+	ft_cntr_set_wait_attr();
+	return fi_cntr_open(domain, &cntr_attr, cntr, cntr);
+}
+
 uint64_t ft_info_to_mr_access(struct fi_info *info)
 {
 	uint64_t mr_access = 0;
@@ -234,55 +240,68 @@ uint64_t ft_info_to_mr_access(struct fi_info *info)
 	return mr_access;
 }
 
-uint64_t *ft_access_to_comb(uint64_t fixed_bits, uint64_t opt_bits)
-{
-	uint64_t flags[10];
-	int num_flags = 0;
-	uint64_t *combinations;
-	int buff_size;
-	int i;
-	int index;
+#define bit_isset(x, i) (x >> i & 1)
+#define for_each_bit(x, i) for (i = 0; i < (8 * sizeof(x)); i++)
 
-	for (i = 0; i < 64 && num_flags < 10; i++) {
-		if (opt_bits >> i & 1)
+static inline int bit_set_count(uint64_t val)
+{
+	int cnt = 0;
+	while (val) {
+		cnt++;
+		val &= val - 1;
+	}
+	return cnt;
+}
+
+int ft_alloc_bit_combo(uint64_t fixed, uint64_t opt,
+		       uint64_t **combos, int *len)
+{
+	uint64_t *flags;
+	int i, num_flags;
+	uint64_t index;
+	int ret;
+
+	num_flags = bit_set_count(opt) + 1;
+	flags = calloc(num_flags, sizeof(fixed));
+	if (!flags) {
+		perror("calloc");
+		ret = -FI_ENOMEM;
+		goto exit;
+	}
+
+	*len = 1 << (num_flags - 1);
+	*combos = calloc(*len, sizeof(fixed));
+	if (!(*combos)) {
+		perror("calloc");
+		ret = -FI_ENOMEM;
+		goto clean;
+	}	
+
+	num_flags = 0;
+	for_each_bit(opt, i) {
+		if (bit_isset(opt, i))
 			flags[num_flags++] = 1 << i;
 	}
-		
-	if (num_flags == 10)
-		return NULL;
 
-	buff_size = 1;
-	for (i = 0; i < num_flags; i++)
-		buff_size *= 2;
-
-	combinations = calloc(buff_size, sizeof(fixed_bits));
-
-	index = 0;
-	for (i = 1; i <= num_flags; ++i)
-		access_combinations(combinations, &index, flags, num_flags, i, 0, 0);
-
-	for (i = 0; i < buff_size - 1; i++)
-		combinations[i] |= fixed_bits;
-
-	return combinations;
-}
-
-void access_combinations(uint64_t *combinations, int *num_comb, uint64_t *flags,
-			 int num_flags, int choose, int curr, uint64_t building)
-{
-	if (choose + curr > num_flags)
-		return;
-
-	if (!choose) {
-		combinations[(*num_comb)++] = building;
-	} else {
-		for (; curr < num_flags; curr++) {
-			access_combinations(combinations, num_comb, flags, num_flags,
-					    choose - 1, curr + 1, building | flags[curr]);
+	for (index = 0; index < (*len); index++) {
+		(*combos)[index] = fixed;
+		for_each_bit(index, i) {
+			if (bit_isset(index, i))
+				(*combos)[index] |= flags[i];
 		}
-	}
+	} 
+	ret = FI_SUCCESS;
+	
+clean:
+	free(flags);
+exit:
+	return ret;
 }
 
+void ft_free_bit_combo(uint64_t *combo)
+{
+	free(combo);
+}
 
 /*
  * Include FI_MSG_PREFIX space in the allocated buffer, and ensure that the

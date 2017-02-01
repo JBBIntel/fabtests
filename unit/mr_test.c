@@ -54,13 +54,18 @@ static int mr_reg()
 	struct fid_mr *mr;
 	uint64_t access;
 	uint64_t *access_combinations;
+	int len = 0;
 
 	access = ft_info_to_mr_access(fi);
-	access_combinations = ft_access_to_comb(0, access);
+	ret = ft_alloc_bit_combo(0, access, &access_combinations, &len);
+	if (ret) {
+		FT_UNIT_STRERR(err_buf, "ft_alloc_bit_combo failed", ret);
+		goto fail;
+	}
 
 	for (i = 0; i < test_cnt; i++) {
 		buf_size = test_size[i].size;
-		for (j = 0; access_combinations[j] != 0; j++) {
+		for (j = 0; j < len; j++) {
 			ret = fi_mr_reg(domain, buf, buf_size, access_combinations[j], 0,
 					FT_MR_KEY, 0, &mr, NULL);
 			if (ret) {
@@ -77,14 +82,13 @@ static int mr_reg()
 	}
 	testret = PASS;
 fail:
-	mr = NULL;
-	free(access_combinations);
+	ft_free_bit_combo(access_combinations);
 	return TEST_RET_VAL(ret, testret);
 }
 
 static int mr_regv()
 {
-	int i, j;
+	int i, j, n;
 	int ret = 0;
 	int testret = FAIL;
 	struct fid_mr *mr;
@@ -93,44 +97,50 @@ static int mr_regv()
 
 	if (!fi->domain_attr->mr_iov_limit) {
 		ret = 1;
-		FT_UNIT_STRERR(err_buf, "fi_mr_regv failed, mr_iov_limit not defined", ret);
+		FT_UNIT_STRERR(err_buf, "fi_mr_regv failed, mr_iov_limit", ret);
 		goto fail;
 	}
 
-	for (i = 1; i <= fi->domain_attr->mr_iov_limit; i++) {
-		base = buf;
-		iov = malloc(sizeof(struct iovec) * i);
-		for (j = 0; j < i; j++) {
-			iov[j].iov_base = base;
-			iov[j].iov_len = test_size[test_cnt - 1].size / i;
-			base += iov[j].iov_len;			
-		}			
+	iov = calloc(fi->domain_attr->mr_iov_limit, sizeof(*iov));
+	if (!iov) {
+		perror("calloc");
+		return FI_ENOMEM;
+	}
 
-		ret = fi_mr_regv(domain, &iov[0], i, ft_info_to_mr_access(fi), 0,
+	for (i = 0; i < test_cnt &&
+	     test_size[i].size <= fi->domain_attr->mr_iov_limit; i++) {
+		n = test_size[i].size;
+		base = buf;
+
+		for (j = 0; j < n; j++) {
+			iov[j].iov_base = base;
+			iov[j].iov_len = test_size[test_cnt - 1].size / n;
+			base += iov[j].iov_len;			
+		}
+
+		ret = fi_mr_regv(domain, &iov[0], n, ft_info_to_mr_access(fi), 0,
 				 FT_MR_KEY, 0, &mr, NULL);
 		if (ret) {
 			FT_UNIT_STRERR(err_buf, "fi_mr_regv failed", ret);
-			free(iov);
-			goto fail;
+			goto clean;
 		}
 
 		ret = fi_close(&mr->fid);
 		if (ret) {
-			free(iov);
 			FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
-			goto fail;
+			goto clean;
 		}
-		free(iov);
 	}
 	testret = PASS;
+clean:
+	free(iov);
 fail:
-	mr = NULL;
 	return TEST_RET_VAL(ret, testret);
 }
 
 static int mr_regattr()
 {
-	int i, j;
+	int i, j, n;
 	int ret = 0;
 	int testret = FAIL;
 	struct fid_mr *mr;
@@ -140,48 +150,56 @@ static int mr_regattr()
 
 	if (!fi->domain_attr->mr_iov_limit) {
 		ret = 1;
-		FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed, mr_iov_limit not defined", ret);
+		FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed, mr_iov_limit", ret);
 		goto fail;
 	}
 
 	attr.access = ft_info_to_mr_access(fi);
 	attr.requested_key = FT_MR_KEY;
 	attr.context = NULL;
+	
+	iov = calloc(fi->domain_attr->mr_iov_limit, sizeof(*iov));
+	if (!iov) {
+		perror("calloc");
+		return -FI_ENOMEM;
+	}
 
-	for (i = 1; i <= fi->domain_attr->mr_iov_limit; i++) {	
+	for (i = 0; i < test_cnt &&
+	     test_size[i].size <= fi->domain_attr->mr_iov_limit; i++) {
+		
+		n = test_size[i].size;
 		base = buf;
-		iov =  malloc (sizeof(struct iovec) * i);
-		for (j = 0; j < i; j++) {
+		for (j = 0; j < n; j++) {
 			iov[j].iov_base = base;
-			iov[j].iov_len = test_size[test_cnt - 1].size / i;
+			iov[j].iov_len = test_size[test_cnt - 1].size / n;
 			base += iov[j].iov_len;
 		}
 
-		attr.iov_count = i;
+		attr.iov_count = n;
 		attr.mr_iov = &iov[0];
 		ret = fi_mr_regattr(domain, &attr, 0, &mr);
 		if (ret) {
 			FT_UNIT_STRERR(err_buf, "fi_mr_regattr failed", ret);
-			goto fail;
+			goto clean;
 		}
 
 		ret = fi_close(&mr->fid);
 		if (ret) {
 			FT_UNIT_STRERR(err_buf, "fi_close failed", ret);
-			goto fail;
+			goto clean;
 		}
-		free(iov);
 	}
 	testret = PASS;
+clean:
+	free(iov);
 fail:
-	mr = NULL;
 	return TEST_RET_VAL(ret, testret);
 }
 
 struct test_entry test_array[] = {
-	TEST_ENTRY(mr_reg, "Test fi_mr_reg for various buffer sizes"),
-	TEST_ENTRY(mr_regv, "Test fi_mr_regv"),
-	TEST_ENTRY(mr_regattr, "Test fi_mr_regattr"),
+	TEST_ENTRY(mr_reg, "Test fi_mr_reg across different access combinations"),
+	TEST_ENTRY(mr_regv, "Test fi_mr_regv across various buffer sizes"),
+	TEST_ENTRY(mr_regattr, "Test fi_mr_regattr across various buffer sizes"),
 	{ NULL, "" }
 };
 
