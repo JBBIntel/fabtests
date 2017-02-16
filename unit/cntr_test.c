@@ -42,43 +42,95 @@
 
 static char err_buf[512];
 
-static int cntr_open_close()
+static int cntr_loop()
 {
-	int i, opened;
-	int ret = 0;
+	size_t i, opened, cntr_cnt;
+	int ret;
+	uint64_t value;
 	int testret = FAIL;
-	struct fid_cntr **cntrs = calloc(fi->domain_attr->cntr_cnt,
+	if (!fi->domain_attr->cntr_cnt) {
+		return -FI_ENOSYS;
+	}	
+
+	cntr_cnt = fi->domain_attr->cntr_cnt;
+	if (100 < cntr_cnt) {
+		cntr_cnt = 100;
+	}
+	struct fid_cntr **cntrs = calloc(cntr_cnt,
 					 sizeof(struct fid_cntr *));
 	if (!cntrs) {
 	 	perror("calloc");
 		return -FI_ENOMEM;
 	}	
 	
-	for (opened = 0; opened < fi->domain_attr->cntr_cnt; opened++) {
+	for (opened = 0; opened < cntr_cnt; opened++) {
 		ret = ft_cntr_open(&cntrs[opened]);
 		if (ret) {
 			FT_PRINTERR("fi_cntr_open", ret);
-			break;
+			goto close;
 		}
 	}
 
 	for (i = 0; i < opened; i++) {
+		value = i;
+		ret = fi_cntr_set(cntrs[i], value);
+		if (ret) {
+			FT_PRINTERR("fi_cntr_set", ret);
+			goto close;
+		}
+		ret = fi_cntr_seterr(cntrs[i], value);
+		if (ret) {
+			FT_PRINTERR("fi_cntr_seterr", ret);
+			goto close;
+		}
+	}
+
+	for (i = 0; i < opened; i++) {
+		value = i;
+		ret = fi_cntr_add(cntrs[i], value);
+		if (ret) {
+			FT_PRINTERR("fi_cntr_add", ret);
+			goto close;
+		}
+		ret = fi_cntr_adderr(cntrs[i], value);
+		if (ret) {
+			FT_PRINTERR("fi_cntr_adderr", ret);
+			goto close;
+		}
+	}
+
+	for (i = 0; i < opened; i++) {
+		value = fi_cntr_read(cntrs[i]);
+		if (value != i*2) {
+			FT_PRINTERR("fi_cntr_read", value);
+			goto close;
+		}
+		value = fi_cntr_readerr(cntrs[i]);
+		if (value != i*2) {
+			FT_PRINTERR("fi_cntr_readerr", value);
+			goto close;
+		}
+	}
+	testret = PASS;
+
+close:
+	for (i = 0; i < opened; i++) {
 		ret = fi_close(&(cntrs[i])->fid);
 		if (ret) {
 			FT_PRINTERR("fi_cntr_close", ret);
-			goto fail;
+			break;
 		}
 	}
-	if (opened == fi->domain_attr->cntr_cnt)	
-		testret = PASS;
 
-fail:
+	if (i < cntr_cnt)	
+		testret = FAIL;
+
 	free(cntrs);
 	return TEST_RET_VAL(ret, testret);
 }
 
 struct test_entry test_array[] = {
-	TEST_ENTRY(cntr_open_close, "Test open/close counters to limit"),
+	TEST_ENTRY(cntr_loop, "Test open set seterr add adderr read readerr close counters"),
 	{ NULL, "" }
 };
 
