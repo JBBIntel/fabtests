@@ -219,24 +219,55 @@ int ft_cntr_open(struct fid_cntr **cntr)
 	return fi_cntr_open(domain, &cntr_attr, cntr, cntr);
 }
 
+int ft_rma_read_target_allowed(uint64_t caps)
+{
+	if (caps & (FI_RMA | FI_ATOMIC)) {
+		if (caps & FI_REMOTE_READ)
+			return 1;
+		return !(caps & (FI_READ | FI_WRITE | FI_REMOTE_WRITE));
+	}
+	return 0;
+}
+
+int ft_rma_write_target_allowed(uint64_t caps)
+{
+	if (caps & (FI_RMA | FI_ATOMIC)) {
+		if (caps & FI_REMOTE_WRITE)
+			return 1;
+		return !(caps & (FI_READ | FI_WRITE | FI_REMOTE_WRITE));
+	}
+	return 0;
+}
+
 uint64_t ft_info_to_mr_access(struct fi_info *info)
 {
 	uint64_t mr_access = 0;
+	if ((info->mode & FI_LOCAL_MR) || (info->domain_attr->mr_mode & FI_MR_LOCAL)) {
+		if (info->caps & (FI_MSG | FI_TAGGED)) {
+			if (info->caps & FT_MSG_MR_ACCESS) {
+				mr_access |= info->caps & FT_MSG_MR_ACCESS;
+			} else {
+				mr_access |= FT_MSG_MR_ACCESS;
+			}
+		}
 
-	if ((info->mode & FI_LOCAL_MR) && (info->caps & (FI_MSG | FI_TAGGED))) {
-		if (info->caps & FT_MSG_MR_ACCESS)
-			mr_access |= info->caps & FT_MSG_MR_ACCESS;
-		else
-			mr_access |= FT_MSG_MR_ACCESS;
+		if (info->caps & (FI_RMA | FI_ATOMIC)) {
+			if (info->caps & FT_RMA_MR_ACCESS) {
+				mr_access |= info->caps & FT_RMA_MR_ACCESS;
+			} else	{
+				mr_access |= FT_RMA_MR_ACCESS;
+			}
+		}
+	} else {
+		if (info->caps & (FI_RMA | FI_ATOMIC)) {
+			if (ft_rma_read_target_allowed(info->caps)) {
+				mr_access |= FI_REMOTE_READ;
+			}
+			if (ft_rma_write_target_allowed(info->caps)) {
+				mr_access |= FI_REMOTE_WRITE;
+			}
+		}
 	}
-
-	if (info->caps & (FI_RMA | FI_ATOMIC)) {
-		if (info->caps & FT_RMA_MR_ACCESS)
-			mr_access |= info->caps & FT_RMA_MR_ACCESS;
-		else
-			mr_access |= FT_RMA_MR_ACCESS;
-	}
-
 	return mr_access;
 }
 
@@ -393,18 +424,22 @@ int ft_open_fabric_res(void)
 int ft_alloc_ep_res(struct fi_info *fi)
 {
 	int ret;
+        printf("entering ft_alloc_ep_res \n");
 
 	if (hints->caps & FI_RMA) {
+	        printf("calling set_rma_caps \n");
 		ret = ft_set_rma_caps(fi, opts.rma_op);
 		if (ret)
 			return ret;
 	}
 
+        printf("calling ft_alloc_msgs \n");
 	ret = ft_alloc_msgs();
 	if (ret)
 		return ret;
 
 	if (cq_attr.format == FI_CQ_FORMAT_UNSPEC) {
+	        printf("calling cq_attr_format \n");
 		if (fi->caps & FI_TAGGED)
 			cq_attr.format = FI_CQ_FORMAT_TAGGED;
 		else
@@ -412,6 +447,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 	}
 
 	if (opts.options & FT_OPT_TX_CQ) {
+	        printf("calling ft_cq_set_wait_attr \n");
 		ft_cq_set_wait_attr();
 		cq_attr.size = fi->tx_attr->size;
 		ret = fi_cq_open(domain, &cq_attr, &txcq, &txcq);
@@ -422,6 +458,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 	}
 
 	if (opts.options & FT_OPT_TX_CNTR) {
+	        printf("calling ft_cntr_set_wait_attr \n");
 		ft_cntr_set_wait_attr();
 		ret = fi_cntr_open(domain, &cntr_attr, &txcntr, &txcntr);
 		if (ret) {
@@ -431,6 +468,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 	}
 
 	if (opts.options & FT_OPT_RX_CQ) {
+	        printf("calling ft_cq_set_wait_attr \n");
 		ft_cq_set_wait_attr();
 		cq_attr.size = fi->rx_attr->size;
 		ret = fi_cq_open(domain, &cq_attr, &rxcq, &rxcq);
@@ -441,6 +479,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 	}
 
 	if (opts.options & FT_OPT_RX_CNTR) {
+	        printf("calling ft_cntr_set_wait_attr \n");
 		ft_cntr_set_wait_attr();
 		ret = fi_cntr_open(domain, &cntr_attr, &rxcntr, &rxcntr);
 		if (ret) {
@@ -456,6 +495,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 		if (opts.av_name) {
 			av_attr.name = opts.av_name;
 		}
+	        printf("calling fi_av_open \n");
 		ret = fi_av_open(domain, &av_attr, &av, NULL);
 		if (ret) {
 			FT_PRINTERR("fi_av_open", ret);
@@ -468,6 +508,7 @@ int ft_alloc_ep_res(struct fi_info *fi)
 int ft_alloc_active_res(struct fi_info *fi)
 {
 	int ret;
+        printf("in ft_alloc_active_res \n");
 
 	ret = ft_alloc_ep_res(fi);
 	if (ret)
